@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>字·墟 - AR</title>
+
+    <!-- A-Frame 库 -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <!-- AR.js 库（使用 jsDelivr CDN，稳定可用） -->
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@master/aframe/build/aframe-ar.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; }
+        body { overflow: hidden; background: #000; }
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100;
+        }
+        .poem-line {
+            position: absolute;
+            color: #e8c97a;
+            font-family: "Songti SC", "宋体", "SimSun", serif;
+            font-size: 16px; text-shadow: 0 0 10px rgba(232,201,122,0.5);
+            opacity: 0; transition: opacity 1.5s ease-in-out;
+            pointer-events: none;
+            left: 10%; width: 80%; text-align: center; bottom: 15%;
+        }
+        .notification {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85); border: 1px solid #e8c97a;
+            color: #e8c97a; padding: 15px 25px;
+            font-family: "Songti SC", "宋体", "SimSun", serif;
+            font-size: 14px; opacity: 0; transition: opacity 0.5s;
+            z-index: 200; pointer-events: none; text-align: center;
+            border-radius: 4px; white-space: pre-line;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="notification" class="notification"></div>
+    <div id="overlay"><div id="poem-container"></div></div>
+
+    <!-- 启动按钮（必须用户点击才能请求相机权限） -->
+    <div id="start-screen" style="
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.9); z-index: 999;
+        display: flex; flex-direction: column; justify-content: center; align-items: center;
+        color: #e8c97a; font-family: 'Songti SC', '宋体', serif; cursor: pointer;
+    ">
+        <div style="font-size: 28px; letter-spacing: 0.3em; margin-bottom: 30px;">字·墟</div>
+        <div id="start-button" style="
+            padding: 15px 40px; border: 1px solid #e8c97a; border-radius: 4px;
+            font-size: 18px; background: transparent; color: #e8c97a;
+        ">触 碰 墓 碑</div>
+        <div style="margin-top: 20px; font-size: 12px; color: #8a7a5a;">点击后请允许相机</div>
+    </div>
+
+    <!-- AR.js 场景 -->
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+        <a-marker preset="hiro">
+            <a-entity id="character-group" position="0 0.2 0"></a-entity>
+        </a-marker>
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <!-- 主控脚本 -->
+    <script>
+        // ==================== 音效管理器 ====================
+        const AudioManager = {
+            audioContext: null,
+            init() {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            playTone(freq, dur, type='sine', vol=0.05) {
+                if(!this.audioContext) return;
+                const o = this.audioContext.createOscillator();
+                const g = this.audioContext.createGain();
+                o.type = type; o.frequency.value = freq;
+                g.gain.value = vol;
+                g.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + dur);
+                o.connect(g); g.connect(this.audioContext.destination);
+                o.start(); o.stop(this.audioContext.currentTime + dur);
+            },
+            playMetalSound() {
+                if(!this.audioContext) return;
+                const o = this.audioContext.createOscillator();
+                const g = this.audioContext.createGain();
+                o.type = 'square'; o.frequency.value = 200;
+                g.gain.value = 0.06;
+                g.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime+0.2);
+                o.connect(g); g.connect(this.audioContext.destination);
+                o.start(); o.stop(this.audioContext.currentTime+0.2);
+            },
+            startDrone() {
+                if(!this.audioContext) return;
+                this.droneOsc = this.audioContext.createOscillator();
+                this.droneGain = this.audioContext.createGain();
+                this.droneOsc.type = 'sine'; this.droneOsc.frequency.value = 55;
+                this.droneGain.gain.value = 0.02;
+                this.droneOsc.connect(this.droneGain);
+                this.droneGain.connect(this.audioContext.destination);
+                this.droneOsc.start();
+            },
+            stopDrone() {
+                if(this.droneGain) {
+                    this.droneGain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime+1);
+                    setTimeout(() => { if(this.droneOsc) this.droneOsc.stop(); }, 1000);
+                }
+            }
+        };
+
+        // ==================== 诗句管理 ====================
+        const POEM_LINES = {
+            act1: [
+                '我们是被删掉的部首，','被简化的笔画，','被拼音替代的发音。','',
+                '我们是农具的名字，','是雨衣的名字，','是一个村庄在消失之前','最后的呼出。','',
+                '现在，我们是数据。'
+            ],
+            act2: [
+                '他们扫描了我们，','记录了我们的坐标，','把我们存放在云端。','',
+                '他们说：你们安全了。','你们将永远活着。','',
+                '但我们失去了','被墨弄脏的权利，','被刀刻错的疼痛，',
+                '被一双手从木头里唤醒的','那个瞬间。','',
+                '你们的"永远"，','不是我们的活着。'
+            ],
+            act3: [
+                '耒在墙上锈成问号','蓑衣挂在博物馆的玻璃后面','碓声沉入溪底','豳风还在吹','',
+                '只是无人识得','那个字','怎么读','',
+                '我们把这些字还给你','在它们彻底消失之前','',
+                '但你能接住吗','你连它们叫什么','都不知道'
+            ]
+        };
+
+        function showPoemLine(text, delay, duration) {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const container = document.getElementById('poem-container');
+                    const line = document.createElement('div');
+                    line.className = 'poem-line';
+                    line.textContent = text;
+                    container.appendChild(line);
+                    requestAnimationFrame(() => { line.style.opacity = '1'; });
+                    setTimeout(() => {
+                        line.style.opacity = '0';
+                        setTimeout(() => {
+                            if(line.parentNode) container.removeChild(line);
+                            resolve();
+                        }, 1500);
+                    }, duration);
+                }, delay);
+            });
+        }
+
+        async function playPoemSequence(lines, lineDuration=3000) {
+            for(let i=0; i<lines.length; i++) {
+                if(lines[i] === '') await new Promise(r => setTimeout(r, 1500));
+                else await showPoemLine(lines[i], 500, lineDuration);
+            }
+        }
+
+        function showNotification(text, duration=2000) {
+            const n = document.getElementById('notification');
+            n.textContent = text; n.style.opacity = '1';
+            setTimeout(() => { n.style.opacity = '0'; }, duration);
+        }
+
+        // ==================== 模型列表 ====================
+        const ANCIENT_CHARS = [
+            'lei', 'suo', 'dui', 'zeng', 'hu', 'bin',
+            'si', 'zeng2', 'deng', 'gou', 'you', 'lou'
+        ];
+        const MODERN_CHARS = ['he', 'ai', 'meng'];
+
+        // ==================== 主函数 ====================
+        async function runARExperience() {
+            AudioManager.init();
+            const characterGroup = document.getElementById('character-group');
+
+            // ========== 第一幕：废墟的苏醒 ==========
+            AudioManager.startDrone();
+            playPoemSequence(POEM_LINES.act1, 3000);
+
+            const total = ANCIENT_CHARS.length;
+            const randomPositions = [];
+            for (let i = 0; i < total; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 0.3 + Math.random() * 0.5;
+                const x = Math.cos(angle) * dist;
+                const z = Math.sin(angle) * dist;
+                const y = 0.2 + Math.random() * 0.7;
+                randomPositions.push({ x: x.toFixed(2), y: y.toFixed(2), z: z.toFixed(2) });
+            }
+
+            for (let i = 0; i < total; i++) {
+                await new Promise(resolve => {
+                    setTimeout(() => {
+                        const entity = document.createElement('a-entity');
+                        entity.setAttribute('id', `char-${ANCIENT_CHARS[i]}`);
+                        entity.setAttribute('gltf-model', `assets/models/${ANCIENT_CHARS[i]}.glb`);
+                        entity.setAttribute('position', '0 0.3 0');
+                        entity.setAttribute('scale', '0.01 0.01 0.01');
+                        entity.setAttribute('animation__appear', {
+                            property: 'scale',
+                            to: '1 1 1',
+                            dur: 1500,
+                            easing: 'easeOutQuad'
+                        });
+                        entity.setAttribute('animation__float', {
+                            property: 'position',
+                            to: `${randomPositions[i].x} ${randomPositions[i].y} ${randomPositions[i].z}`,
+                            dur: 2500,
+                            easing: 'easeInOutQuad'
+                        });
+                        characterGroup.appendChild(entity);
+                        AudioManager.playTone(220 + i * 25, 0.4, 'sine', 0.04);
+                        resolve();
+                    }, i * 1200);
+                });
+            }
+
+            await new Promise(r => setTimeout(r, 4000));
+
+            // 绑定点击提示
+            ANCIENT_CHARS.forEach(charId => {
+                const entity = document.getElementById(`char-${charId}`);
+                if (entity) {
+                    entity.addEventListener('click', () => {
+                        showNotification('此字不在字库中。\n无法复制。\n无法搜索。\n无法翻译。', 2500);
+                    });
+                }
+            });
+
+            // ========== 第二幕：虚假的永生 ==========
+            playPoemSequence(POEM_LINES.act2, 3000);
+
+            for (let i = 0; i < MODERN_CHARS.length; i++) {
+                await new Promise(resolve => {
+                    setTimeout(() => {
+                        const entity = document.createElement('a-entity');
+                        entity.setAttribute('id', `modern-${MODERN_CHARS[i]}`);
+                        entity.setAttribute('gltf-model', `assets/models/${MODERN_CHARS[i]}.glb`);
+                        const dropX = (Math.random() - 0.5) * 0.4;
+                        const dropZ = (Math.random() - 0.5) * 0.4;
+                        entity.setAttribute('position', `${dropX} 2 ${dropZ}`);
+                        entity.setAttribute('scale', '1.3 1.3 1.3');
+                        entity.setAttribute('animation__fall', {
+                            property: 'position',
+                            from: `${dropX} 3 ${dropZ}`,
+                            to: `${dropX} 0.3 ${dropZ}`,
+                            dur: 1000,
+                            easing: 'easeInBounce'
+                        });
+                        characterGroup.appendChild(entity);
+                        AudioManager.playMetalSound();
+                        resolve();
+                    }, i * 2000);
+                });
+            }
+
+            await new Promise(r => setTimeout(r, 3000));
+
+            // ========== 第三幕：失落的诗 ==========
+            AudioManager.stopDrone();
+            playPoemSequence(POEM_LINES.act3, 3500);
+
+            for (let i = 0; i < total; i++) {
+                const entity = document.getElementById(`char-${ANCIENT_CHARS[i]}`);
+                if (entity) {
+                    const row = Math.floor(i / 4);
+                    const col = i % 4;
+                    entity.setAttribute('animation__rearrange', {
+                        property: 'position',
+                        to: `${(col - 1.5) * 0.3} ${1.2 - row * 0.25} -0.5`,
+                        dur: 4000,
+                        easing: 'easeInOutQuad'
+                    });
+                }
+            }
+
+            MODERN_CHARS.forEach((char, i) => {
+                const entity = document.getElementById(`modern-${char}`);
+                if (entity) {
+                    entity.setAttribute('animation__push', {
+                        property: 'position',
+                        to: `${(i - 1) * 1.5} 0.1 -0.5`,
+                        dur: 3000,
+                        easing: 'easeInOutQuad'
+                    });
+                }
+            });
+        }
+
+        // ==================== 点击启动 ====================
+        document.getElementById('start-button').addEventListener('click', () => {
+            document.getElementById('start-screen').style.display = 'none';
+            if (navigator.vibrate) navigator.vibrate(300);
+            runARExperience();
+        });
+    </script>
+</body>
+</html>

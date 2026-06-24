@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>字·墟</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a1a;
+            color: #e8d5a3;
+            font-family: "Songti SC", "宋体", "SimSun", serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+            padding: 20px;
+        }
+        .message { max-width: 300px; line-height: 2; font-size: 16px; }
+        .title { font-size: 24px; margin-bottom: 30px; letter-spacing: 0.3em; }
+        .funeral-text { color: #8a7a5a; font-size: 14px; margin-top: 40px; }
+    </style>
+</head>
+<body>
+    <div class="message">
+        <div class="title">字·墟</div>
+        <div id="content"></div>
+    </div>
+
+    <script>
+        (function() {
+            const content = document.getElementById('content');
+            const hasVisited = localStorage.getItem('word-ruins-visited');
+
+            if (hasVisited) {
+                content.innerHTML = `
+                    <p class="funeral-text">葬礼已经结束。</p>
+                    <p class="funeral-text">那些字不会再来。</p>
+                `;
+            } else {
+                localStorage.setItem('word-ruins-visited', 'true');
+                window.location.href = 'index.html';
+            }
+        })();
+    </script>
+</body>
+</html>
